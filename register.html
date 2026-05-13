@@ -354,7 +354,7 @@
                     const formData = new FormData();
                     formData.append("image", blob, "register.jpg");
                     formData.append("employee_id", state.employee.id);
-                    formData.append("company_id", "TheSuit-99");
+                
 
                     const response = await fetch(`${API_URL}/register/`, {
                         method: "POST",
