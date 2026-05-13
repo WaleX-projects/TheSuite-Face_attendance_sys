@@ -1,0 +1,398 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TheSuit | Employee Registration</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- MediaPipe Face Mesh -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --primary: #1E6BF1;
+            --bg-main: #F8FAFC;
+        }
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg-main);
+            overscroll-behavior: none;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 32px;
+            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.05);
+        }
+        .nav-page { display: none; }
+        .nav-page.active { display: block; animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 420px;
+            aspect-ratio: 1/1;
+            background: #000;
+            border-radius: 1000px; /* Circle for face */
+            overflow: hidden;
+            margin: 0 auto;
+            border: 8px solid white;
+            box-shadow: 0 0 0 2px #E2E8F0;
+        }
+        #video-feed { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        .scan-overlay {
+            position: absolute;
+            inset: 0;
+            border: 2px dashed rgba(255,255,255,0.3);
+            border-radius: 1000px;
+            pointer-events: none;
+        }
+        .progress-ring {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            transform: rotate(-90deg);
+        }
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid #fff;
+            border-radius: 50%;
+            width: 24px; height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        input:focus { outline: none; border-color: var(--primary); }
+        input:read-only { background-color: #F1F5F9; color: #64748B; cursor: not-allowed; }
+    </style>
+</head>
+<body class="antialiased text-slate-900">
+
+    <header class="p-8 max-w-md mx-auto flex justify-center">
+        <div class="flex items-center gap-2">
+            <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200">
+                <i class="fa-solid fa-user-plus text-white text-lg"></i>
+            </div>
+            <h1 class="text-2xl font-black tracking-tight">TheSuit</h1>
+        </div>
+    </header>
+
+    <main class="px-6 max-w-md mx-auto pb-12">
+        
+        <!-- PAGE 1: DETAILS -->
+        <section id="page-details" class="nav-page active">
+            <div class="glass-card p-8 border border-white">
+                <div class="mb-8">
+                    <h2 class="text-2xl font-extrabold mb-2">Registration</h2>
+                    <p class="text-slate-500 text-sm">Please provide your employee credentials to begin identity enrollment.</p>
+                </div>
+
+                <div class="space-y-6">
+                    <div class="space-y-2">
+                        <label class="text-xs font-bold uppercase tracking-wider text-slate-400 ml-1">Employee ID</label>
+                        <div class="relative">
+                            <input type="text" id="emp-id" placeholder="Enter ID" 
+                                class="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 font-bold text-lg transition-all focus:bg-white focus:shadow-xl focus:shadow-blue-50">
+                            <i class="fa-solid fa-id-card absolute right-6 top-1/2 -translate-y-1/2 text-slate-300"></i>
+                        </div>
+                    </div>
+
+                    <button id="btn-next" class="w-full bg-slate-900 hover:bg-black text-white font-bold py-5 px-6 rounded-2xl transition-all shadow-xl shadow-slate-200 flex items-center justify-center gap-3 active:scale-95">
+                        <span>Continue Enrollment</span>
+                        <i class="fa-solid fa-arrow-right text-xs"></i>
+                    </button>
+                    
+                    <p class="text-center text-[10px] text-slate-400 font-medium px-4">
+                        By continuing, you consent to secure biometric data processing for identity verification purposes only.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- PAGE 2: CAMERA -->
+        <section id="page-camera" class="nav-page">
+            <div class="text-center mb-8">
+                <h2 class="text-xl font-bold mb-1">Face Enrollment</h2>
+                <div id="liveness-status" class="inline-flex items-center gap-2 bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest">
+                    <span class="relative flex h-2 w-2">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                    </span>
+                    Blink Twice to Authenticate
+                </div>
+            </div>
+
+            <div class="camera-container mb-10">
+                <video id="video-feed" autoplay playsinline muted></video>
+                <div class="scan-overlay"></div>
+                <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div id="cam-feedback" class="bg-black/60 backdrop-blur-md text-white text-[10px] font-bold py-2 px-4 rounded-full border border-white/20">
+                        Position Face in Circle
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div class="bg-white p-5 rounded-3xl border border-slate-100 flex items-center gap-4">
+                    <div id="check-blink" class="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center transition-colors">
+                        <i class="fa-solid fa-eye text-slate-300"></i>
+                    </div>
+                    <span class="text-[10px] font-bold uppercase tracking-tight leading-tight">Liveness<br>Check</span>
+                </div>
+                <div class="bg-white p-5 rounded-3xl border border-slate-100 flex items-center gap-4">
+                    <div id="check-face" class="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center transition-colors">
+                        <i class="fa-solid fa-user-check text-slate-300"></i>
+                    </div>
+                    <span class="text-[10px] font-bold uppercase tracking-tight leading-tight">Biometric<br>Capture</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- PAGE 3: RESULT -->
+        <section id="page-result" class="nav-page">
+            <div class="glass-card p-10 text-center border border-white">
+                <div id="res-bg" class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-8 transition-all duration-700">
+                    <i id="res-icon" class="text-4xl"></i>
+                </div>
+                <h2 id="res-title" class="text-3xl font-black mb-3">--</h2>
+                <p id="res-msg" class="text-slate-500 text-sm mb-10 leading-relaxed px-4">--</p>
+                
+                <button id="btn-back-to-dash" class="w-full bg-slate-900 text-white font-bold py-5 rounded-2xl shadow-xl shadow-slate-200">Return to Dashboard</button>
+            </div>
+        </section>
+
+    </main>
+
+    <canvas id="capture-canvas" class="hidden"></canvas>
+
+    <script>
+    (function() {
+        const state = {
+            employee: {
+                id: null
+            },
+            camera: null,
+            faceMesh: null,
+            isProcessing: false,
+            blinks: 0,
+            lastEyeState: 'open',
+            framesCaptured: false
+        };
+
+        const API_URL = "http://51.20.54.232:8000/api";
+
+        // =============================================
+        // UI HELPERS
+        // =============================================
+        const navigate = (id) => {
+            document.querySelectorAll('.nav-page').forEach(p => p.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+        };
+
+        const updateIndicator = (id, active) => {
+            const el = document.getElementById(`check-${id}`);
+            if (active) {
+                el.className = "w-8 h-8 rounded-lg bg-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-100";
+                el.querySelector('i').className = `fa-solid fa-${id === 'blink' ? 'check' : 'user-check'}`;
+            }
+        };
+
+        // =============================================
+        // AUTO-FILL & QR LOGIC
+        // =============================================
+        
+        /**
+         * Priority Rule: QR code value > URL token > manual input
+         */
+        function initEnrollmentDetails() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const token = urlParams.get('token');
+            
+            if (token) {
+                setEmployeeId(token, true); // Lock if from URL
+            }
+        }
+
+        /**
+         * Standardized function to update employee ID
+         * @param {string} id - The ID to set
+         * @param {boolean} lockField - Whether to make input read-only
+         */
+        window.setEmployeeId = function(id, lockField = false) {
+            if (!id) return;
+            
+            const input = document.getElementById('emp-id');
+            state.employee.id = id;
+            input.value = id;
+            
+            if (lockField) {
+                input.readOnly = true;
+            }
+        };
+
+        /**
+         * QR Handler Placeholder
+         * Call this function when a QR is scanned
+         */
+        window.handleQRScan = function(decodedString) {
+            // Priority: QR overrides URL token
+            setEmployeeId(decodedString, true); 
+            console.log("QR value applied:", decodedString);
+        };
+
+        // Initialize on load
+        window.addEventListener('load', initEnrollmentDetails);
+
+        // =============================================
+        // REGISTRATION FLOW
+        // =============================================
+        document.getElementById('btn-next').onclick = () => {
+            const idValue = document.getElementById('emp-id').value.trim();
+            if (!idValue) {
+                alert("Please enter a valid Employee ID");
+                return;
+            }
+            state.employee.id = idValue;
+            startCameraSequence();
+        };
+
+        async function preloadAI() {
+            state.faceMesh = new FaceMesh({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+            });
+            state.faceMesh.setOptions({
+                maxNumFaces: 1,
+                refineLandmarks: true,
+                minDetectionConfidence: 0.8,
+                minTrackingConfidence: 0.8
+            });
+            state.faceMesh.onResults(handleFaceResults);
+        }
+        preloadAI();
+
+        async function startCameraSequence() {
+            navigate('page-camera');
+            const video = document.getElementById('video-feed');
+            
+            state.camera = new Camera(video, {
+                onFrame: async () => {
+                    if (state.faceMesh && !state.isProcessing) {
+                        await state.faceMesh.send({ image: video });
+                    }
+                },
+                width: 640, height: 480
+            });
+            state.camera.start();
+        }
+
+        function handleFaceResults(results) {
+            if (state.isProcessing) return;
+
+            const feedback = document.getElementById('cam-feedback');
+            if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
+                feedback.innerText = "Center your face";
+                return;
+            }
+
+            feedback.innerText = "Check: Looking good";
+            const landmarks = results.multiFaceLandmarks[0];
+            
+            const leftEye = [landmarks[362], landmarks[385], landmarks[387], landmarks[263], landmarks[373], landmarks[380]];
+            const ear = calculateEAR(leftEye);
+
+            if (ear < 0.18) {
+                if (state.lastEyeState === 'open') {
+                    state.blinks++;
+                    state.lastEyeState = 'closed';
+                    document.getElementById('liveness-status').innerText = `Blink Detected: ${state.blinks}/2`;
+                }
+            } else {
+                state.lastEyeState = 'open';
+            }
+
+            if (state.blinks >= 2 && !state.framesCaptured) {
+                updateIndicator('blink', true);
+                captureRegistration();
+            }
+        }
+
+        function calculateEAR(points) {
+            const v1 = Math.dist(points[1], points[5]);
+            const v2 = Math.dist(points[2], points[4]);
+            const h = Math.dist(points[0], points[3]);
+            return (v1 + v2) / (2.0 * h);
+        }
+        Math.dist = (p1, p2) => Math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2);
+
+        // =============================================
+        // API HANDLER
+        // =============================================
+        async function captureRegistration() {
+            state.isProcessing = true;
+            state.framesCaptured = true;
+            updateIndicator('face', true);
+
+            const video = document.getElementById('video-feed');
+            const canvas = document.getElementById('capture-canvas');
+            canvas.width = 640;
+            canvas.height = 480;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+
+            canvas.toBlob(async (blob) => {
+                if (state.camera) state.camera.stop();
+
+                try {
+                    const formData = new FormData();
+                    formData.append("image", blob, "register.jpg");
+                    formData.append("employee_id", state.employee.id);
+                    formData.append("company_id", "TheSuit-99");
+
+                    const response = await fetch(`${API_URL}/register/`, {
+                        method: "POST",
+                        body: formData
+                    });
+
+                    const result = await response.json();
+                    showFinalResult(result);
+
+                } catch (e) {
+                    showFinalResult({ success: false, message: "Network connectivity issue." });
+                }
+            }, 'image/jpeg', 0.85);
+        }
+
+function showFinalResult(result) {
+    navigate('page-result');
+    const bg = document.getElementById('res-bg');
+    const icon = document.getElementById('res-icon');
+
+    // Refactored to standardized backend structure
+    if (result.success) {
+        bg.className = "w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-8 bg-emerald-500 shadow-lg shadow-emerald-100 scale-110";
+        icon.className = "fa-solid fa-user-check text-4xl text-white";
+    } else {
+        bg.className = "w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-8 bg-red-500 shadow-lg shadow-red-100 scale-110";
+        icon.className = "fa-solid fa-triangle-exclamation text-4xl text-white";
+    }
+
+    document.getElementById('res-title').innerText = result.success ? "Success" : "Failed";
+    document.getElementById('res-msg').innerText = result.message || "Something went wrong";
+}
+
+        document.getElementById('btn-back-to-dash').onclick = () => window.location.reload();
+
+    })();
+    </script>
+</body>
+</html>
+
+```
