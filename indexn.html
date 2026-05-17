@@ -1,0 +1,676 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TheSuit | Secure Terminal</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght=300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- MediaPipe Face Mesh -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --primary: #1E6BF1;
+            --bg-main: #F8FAFC;
+        }
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg-main);
+            overscroll-behavior: none;
+            color: #1e293b;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 28px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+        }
+        .nav-page { display: none; }
+        .nav-page.active { display: block; animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Circular Camera Container */
+        .camera-container {
+            position: relative;
+            width: 280px;
+            height: 280px;
+            margin: 0 auto 1.5rem;
+        }
+        .camera-circle {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            overflow: hidden;
+            background: #000;
+            border: 6px solid #fff;
+            box-shadow: 0 0 0 2px var(--primary), 0 10px 30px rgba(30, 107, 241, 0.15);
+            position: relative;
+            z-index: 10;
+        }
+        #video-feed { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        
+        .scan-line {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 4px;
+            background: linear-gradient(to bottom, transparent, var(--primary));
+            box-shadow: 0 0 20px var(--primary);
+            opacity: 0.7;
+            animation: scanCircle 3s ease-in-out infinite;
+            z-index: 20;
+            pointer-events: none;
+        }
+        @keyframes scanCircle { 0% { top: -10% } 50% { top: 100% } 100% { top: -10% } }
+
+        /* Progression Bar dots */
+        .step-dot {
+            width: 8px; height: 8px; border-radius: 50%; background: #e2e8f0;
+            transition: all 0.3s ease;
+        }
+        .step-dot.active { background: var(--primary); width: 24px; border-radius: 4px; }
+        .step-dot.complete { background: #10b981; }
+
+        .spinner {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid #fff;
+            border-radius: 50%;
+            width: 18px; height: 18px;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .challenge-badge { animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { transform: translateX(-50%) scale(1); } 50% { transform: translateX(-50%) scale(1.05); } 100% { transform: translateX(-50%) scale(1); } }
+        
+        /* Large visual card highlight */
+        .active-task-pulse {
+            animation: borderGlow 1.5s infinite alternate;
+        }
+        @keyframes borderGlow {
+            0% { box-shadow: 0 0 5px rgba(30, 107, 241, 0.2); border-color: #cbd5e1; }
+            100% { box-shadow: 0 0 20px rgba(30, 107, 241, 0.6); border-color: var(--primary); }
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <header class="p-6 max-w-md mx-auto flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-black text-blue-600 tracking-tight">TheSuit</h1>
+            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Secure Terminal</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <!-- Audio Toggle Option -->
+            <button id="btn-toggle-voice" class="text-slate-500 bg-white hover:bg-slate-50 border border-slate-100 shadow-sm w-9 h-9 rounded-lg flex items-center justify-center transition-colors" title="Toggle Voice Guidance">
+                <i id="voice-icon" class="fa-solid fa-volume-high"></i>
+            </button>
+            <div id="clock" class="text-right font-mono font-bold text-slate-800 bg-white px-3 py-1 rounded-lg border border-slate-100 shadow-sm">00:00:00</div>
+        </div>
+    </header>
+
+    <!-- Progress Tracker (Hidden on configuration page) -->
+    <div id="tracker-bar" class="max-w-md mx-auto px-10 mb-6 flex items-center justify-between hidden">
+        <div id="dot-1" class="step-dot active"></div>
+        <div class="flex-1 h-[2px] bg-slate-100 mx-2"></div>
+        <div id="dot-2" class="step-dot"></div>
+        <div class="flex-1 h-[2px] bg-slate-100 mx-2"></div>
+        <div id="dot-3" class="step-dot"></div>
+    </div>
+
+    <!-- Custom Notification Toast -->
+    <div id="custom-toast" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-lg transition-all transform scale-90 opacity-0 pointer-events-none flex items-center gap-2">
+        <i class="fa-solid fa-circle-info text-blue-400"></i>
+        <span id="toast-text">Notification</span>
+    </div>
+
+    <main class="px-6 max-w-md mx-auto pb-12">
+        
+        <!-- PAGE 0: CONFIGURATION -->
+        <section id="page-config" class="nav-page">
+            <div class="glass-card p-8 border border-slate-100">
+                <div class="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-6">
+                    <i class="fa-solid fa-sliders text-2xl"></i>
+                </div>
+                <h2 class="text-xl font-black text-slate-800 mb-2">Terminal Setup</h2>
+                <p class="text-xs text-slate-500 mb-6 leading-relaxed">Enter your Company ID below to link this hardware deployment to your active portal dashboard.</p>
+                
+                <div class="mb-6">
+                    <label class="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-2">Company ID / Token</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400">
+                            <i class="fa-solid fa-key text-xs"></i>
+                        </span>
+                        <input type="text" id="input-token" placeholder="e.g. your_company_uuid" class="w-full bg-slate-50 border border-slate-200 rounded-xl py-4 pl-10 pr-4 text-sm font-bold text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white transition-colors">
+                    </div>
+                </div>
+
+                <button id="btn-save-config" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-100 transition-all active:scale-95 flex items-center justify-center gap-2">
+                    <span>Configure Terminal</span>
+                    <i class="fa-solid fa-circle-check text-sm"></i>
+                </button>
+            </div>
+        </section>
+
+        <!-- PAGE 1: START / GEOFENCE -->
+        <section id="page-start" class="nav-page">
+            <div class="glass-card p-8 text-center border border-white">
+                <div class="w-20 h-20 bg-blue-50 text-blue-600 rounded-[2rem] flex items-center justify-center mx-auto mb-6 transform rotate-3 hover:rotate-0 transition-transform">
+                    <i class="fa-solid fa-location-dot text-3xl"></i>
+                </div>
+                <h2 class="text-2xl font-extrabold mb-1">Check In</h2>
+                <div id="company-display" class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Terminal ID: Not Set</div>
+                
+                <button id="btn-change-token" class="text-[10px] text-blue-500 hover:underline font-bold mb-6 block mx-auto">
+                    <i class="fa-solid fa-arrows-rotate mr-1"></i>Reset Connection
+                </button>
+
+                <p class="text-slate-500 text-sm mb-8 leading-relaxed">Your present coordinates and face verification are required to record attendance.</p>
+                
+                <div id="status-area" class="space-y-3 mb-8 text-left hidden">
+                    <div id="geo-status" class="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                        <div class="status-icon w-8 h-8 flex items-center justify-center rounded-full bg-white shadow-sm text-blue-600">
+                            <div class="spinner !border-blue-200 !border-top-blue-600"></div>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Geofence Status</span>
+                            <span class="text-xs font-bold text-slate-700" id="geo-status-text">Verifying Geofence...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <button id="btn-start" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-5 px-6 rounded-[1.5rem] transition-all shadow-xl shadow-blue-100 flex items-center justify-center gap-3 active:scale-95">
+                    <span>Start Attendance</span>
+                    <i class="fa-solid fa-chevron-right text-xs"></i>
+                </button>
+            </div>
+        </section>
+
+        <!-- PAGE 2: CAMERA / LIVENESS CHALLENGES -->
+        <section id="page-camera" class="nav-page">
+            <div class="text-center mb-4">
+                <h2 class="font-black text-slate-800 text-lg">Biometric Security</h2>
+                <p id="challenge-instructions" class="text-xs text-blue-600 font-bold">Initializing camera parameters...</p>
+            </div>
+
+            <div class="camera-container">
+                <div class="camera-circle">
+                    <video id="video-feed" autoplay playsinline muted></video>
+                    <div class="scan-line"></div>
+                </div>
+                <!-- Challenge Badge -->
+                <div id="challenge-badge" class="challenge-badge absolute -bottom-2 left-1/2 -translate-x-1/2 z-30 bg-blue-600 text-white px-6 py-2 rounded-full shadow-lg text-[11px] font-black uppercase tracking-widest whitespace-nowrap">
+                    Verification 1/2
+                </div>
+            </div>
+
+            <div id="cam-feedback" class="text-center text-slate-400 font-bold text-[10px] uppercase tracking-widest mb-6">
+                Please look directly at the camera
+            </div>
+
+            <!-- Two Random Challenges Status cards with Enlarged Icons and pulsing borders -->
+            <div class="grid grid-cols-2 gap-4">
+                <div id="challenge-1-ui" class="bg-white p-5 rounded-2xl border border-slate-100 flex flex-col items-center justify-center gap-2 shadow-sm transition-all duration-300">
+                    <div class="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center">
+                        <i class="fa-solid fa-circle-notch fa-spin text-slate-300 text-xl" id="ch1-icon"></i>
+                    </div>
+                    <span class="text-[10px] font-extrabold uppercase text-slate-500 text-center" id="ch1-name">Pending</span>
+                </div>
+                <div id="challenge-2-ui" class="bg-white p-5 rounded-2xl border border-slate-100 flex flex-col items-center justify-center gap-2 shadow-sm transition-all duration-300">
+                    <div class="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center">
+                        <i class="fa-solid fa-circle-notch fa-spin text-slate-300 text-xl" id="ch2-icon"></i>
+                    </div>
+                    <span class="text-[10px] font-extrabold uppercase text-slate-500 text-center" id="ch2-name">Pending</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- PAGE 3: RESULT -->
+        <section id="page-result" class="nav-page">
+            <div class="glass-card p-10 text-center border border-white">
+                <div id="res-icon" class="w-24 h-24 rounded-[2.5rem] flex items-center justify-center mx-auto mb-8 shadow-inner transition-all"></div>
+                <h2 id="res-title" class="text-2xl font-black mb-2 text-slate-800">--</h2>
+                <p id="res-msg" class="text-slate-500 text-sm mb-10 leading-relaxed px-4">--</p>
+                
+                <button id="btn-reset" class="w-full bg-slate-900 hover:bg-black text-white font-bold py-5 rounded-[1.5rem] transition-all active:scale-95 shadow-xl shadow-slate-100">Return to Dashboard</button>
+            </div>
+        </section>
+
+    </main>
+
+    <canvas id="capture-canvas" class="hidden"></canvas>
+
+    <script>
+    (function() {
+        const state = {
+            companyId: null,
+            camera: null,
+            faceMesh: null,
+            isProcessing: false,
+            challenges: [],
+            currentChallengeIdx: 0,
+            challengeConfig: [
+                { id: 'blink', label: 'Blink your eyes', speech: 'Please blink your eyes', icon: 'fa-eye' },
+                { id: 'mouth', label: 'Open your mouth', speech: 'Please open your mouth wide', icon: 'fa-face-surprise' },
+                { id: 'smile', label: 'Smile for the camera', speech: 'Give us a big smile', icon: 'fa-face-smile-beam' },
+                { id: 'eyebrows', label: 'Raise your eyebrows', speech: 'Please raise your eyebrows', icon: 'fa-up-long' },
+                { id: 'still', label: 'Stay still', speech: 'Please stay still and look straight ahead', icon: 'fa-street-view' }
+            ],
+            stillStartPos: null,
+            stillFrames: 0,
+            voiceEnabled: true
+        };
+
+        const API_URL = "https://simplehr.name.ng/api";
+
+        // Native Text to Speech Helper
+        function playSpeech(text) {
+            if (!state.voiceEnabled) return;
+            if ('speechSynthesis' in window) {
+                // Cancel ongoing synthesis to prevent queues overlapping
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 1.0; 
+                utterance.pitch = 1.0;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        // Voice Guidance Toggle Interaction
+        const toggleBtn = document.getElementById('btn-toggle-voice');
+        const voiceIcon = document.getElementById('voice-icon');
+        toggleBtn.onclick = () => {
+            state.voiceEnabled = !state.voiceEnabled;
+            if (state.voiceEnabled) {
+                voiceIcon.className = "fa-solid fa-volume-high text-blue-600";
+                toggleBtn.classList.add('border-blue-200', 'bg-blue-50/50');
+                showToast("Voice Guidance On");
+                playSpeech("Voice guidance activated.");
+            } else {
+                window.speechSynthesis.cancel();
+                voiceIcon.className = "fa-solid fa-volume-xmark text-slate-400";
+                toggleBtn.classList.remove('border-blue-200', 'bg-blue-50/50');
+                showToast("Voice Guidance Muted");
+            }
+        };
+
+        // Toast Helper
+        function showToast(msg) {
+            const toast = document.getElementById('custom-toast');
+            document.getElementById('toast-text').innerText = msg;
+            toast.classList.remove('scale-90', 'opacity-0', 'pointer-events-none');
+            toast.classList.add('scale-100', 'opacity-100');
+            setTimeout(() => {
+                toast.classList.add('scale-90', 'opacity-0', 'pointer-events-none');
+                toast.classList.remove('scale-100', 'opacity-100');
+            }, 3500);
+        }
+
+        const navigate = (id, step) => {
+            document.querySelectorAll('.nav-page').forEach(p => p.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            
+            const tracker = document.getElementById('tracker-bar');
+            if (id === 'page-config') {
+                tracker.classList.add('hidden');
+            } else {
+                tracker.classList.remove('hidden');
+                for(let i=1; i<=3; i++) {
+                    const dot = document.getElementById(`dot-${i}`);
+                    dot.classList.remove('active', 'complete');
+                    if(i < step) dot.classList.add('complete');
+                    if(i === step) dot.classList.add('active');
+                }
+            }
+        };
+
+        const updateClock = () => {
+            document.getElementById('clock').innerText = new Date().toLocaleTimeString('en-GB');
+        };
+        setInterval(updateClock, 1000);
+
+        async function preloadAI() {
+            state.faceMesh = new FaceMesh({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+            });
+            state.faceMesh.setOptions({
+                maxNumFaces: 1,
+                refineLandmarks: true,
+                minDetectionConfidence: 0.8,
+                minTrackingConfidence: 0.8
+            });
+            state.faceMesh.onResults(handleAI);
+        }
+        preloadAI();
+
+        // Admin Save Config Action
+        document.getElementById('btn-save-config').onclick = () => {
+            const tokenInput = document.getElementById('input-token').value.trim();
+            if(!tokenInput) {
+                showToast("Please enter a valid Company ID.");
+                return;
+            }
+            localStorage.setItem('thesuit_terminal_token', tokenInput);
+            state.companyId = tokenInput;
+            document.getElementById('company-display').innerText = `Terminal ID: ${tokenInput}`;
+            navigate('page-start', 1);
+        };
+
+        // Admin Reset Connection
+        document.getElementById('btn-change-token').onclick = () => {
+            localStorage.removeItem('thesuit_terminal_token');
+            document.getElementById('input-token').value = '';
+            showToast("Terminal configuration reset.");
+            navigate('page-config');
+        };
+
+        // Start Attendance Trigger (Location Check)
+        document.getElementById('btn-start').onclick = async () => {
+            const statusArea = document.getElementById('status-area');
+            const btn = document.getElementById('btn-start');
+            
+            statusArea.classList.remove('hidden');
+            btn.disabled = true;
+            btn.innerHTML = `<div class="spinner"></div>`;
+
+            if (!navigator.geolocation) {
+                updateStatus('geo', 'error', 'GPS not supported');
+                btn.disabled = false;
+                btn.innerHTML = `Start Attendance`;
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                updateStatus('geo', 'pending', 'Checking Geofence...');
+                
+                const result = await validateLocation(coords);
+                
+                if (result.success) {
+                    updateStatus('geo', 'success', result.message || 'Inside Workzone');
+                    setTimeout(() => startCameraSequence(), 800);
+                } else {
+                    showError("Access Denied", result.message || "You are outside the allowed geofence perimeter.");
+                }
+            }, (err) => {
+                showError("GPS Location Error", "Could not capture device coordinates. Ensure high-accuracy GPS is enabled.");
+                btn.disabled = false;
+                btn.innerHTML = `Start Attendance`;
+            }, { enableHighAccuracy: true, timeout: 15000 });
+        };
+
+        async function validateLocation(coords) {
+            try {
+                const response = await fetch(`${API_URL}/verify-location/`, {
+                    method: 'POST',
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        latitude: coords.lat,
+                        longitude: coords.lng,
+                        company_id: state.companyId
+                    }),
+                });
+                return await response.json();
+            } catch (error) {
+                return { success: false, message: "Server connection timeout." };
+            }
+        }
+
+        function updateStatus(id, type, text) {
+            const el = document.getElementById(`${id}-status`);
+            const icon = el.querySelector('.status-icon');
+            const label = document.getElementById('geo-status-text');
+            
+            label.innerText = text;
+            if (type === 'success') {
+                icon.className = "status-icon w-8 h-8 flex items-center justify-center rounded-full bg-emerald-50 text-emerald-600";
+                icon.innerHTML = `<i class="fa-solid fa-circle-check"></i>`;
+            } else if (type === 'error') {
+                icon.className = "status-icon w-8 h-8 flex items-center justify-center rounded-full bg-red-50 text-red-600";
+                icon.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i>`;
+            } else {
+                icon.className = "status-icon w-8 h-8 flex items-center justify-center rounded-full bg-white shadow-sm text-blue-600";
+                icon.innerHTML = `<div class="spinner !border-blue-200 !border-top-blue-600"></div>`;
+            }
+        }
+
+        // Initialize Camera flow
+        async function startCameraSequence() {
+            // Pick exactly 2 random straight-facing challenges
+            state.challenges = [...state.challengeConfig].sort(() => 0.5 - Math.random()).slice(0, 2);
+            state.currentChallengeIdx = 0;
+            state.stillStartPos = null;
+            state.stillFrames = 0;
+
+            state.challenges.forEach((ch, idx) => {
+                const ui = document.getElementById(`challenge-${idx+1}-ui`);
+                // Clear any leftover custom animation/glow states
+                ui.className = "bg-white p-5 rounded-2xl border border-slate-100 flex flex-col items-center justify-center gap-2 shadow-sm transition-all duration-300";
+                
+                const iconEl = document.getElementById(`ch${idx+1}-icon`);
+                iconEl.className = `fa-solid ${ch.icon} text-slate-300 text-xl`;
+                
+                document.getElementById(`ch${idx+1}-name`).innerText = ch.label;
+            });
+
+            updateChallengeUI();
+            navigate('page-camera', 2);
+
+            const video = document.getElementById('video-feed');
+            state.camera = new Camera(video, {
+                onFrame: async () => {
+                    if (state.faceMesh && !state.isProcessing) {
+                        await state.faceMesh.send({ image: video });
+                    }
+                },
+                width: 640, height: 640
+            });
+            state.camera.start();
+        }
+
+        function updateChallengeUI() {
+            const ch = state.challenges[state.currentChallengeIdx];
+            document.getElementById('challenge-badge').innerText = `Challenge ${state.currentChallengeIdx + 1}/2`;
+            document.getElementById('challenge-instructions').innerText = `Perform Action: ${ch.label}`;
+            
+            // Visual active-glow state
+            const activeUiNum = state.currentChallengeIdx + 1;
+            const activeUi = document.getElementById(`challenge-${activeUiNum}-ui`);
+            activeUi.classList.add('active-task-pulse', 'border-blue-500', 'bg-blue-50/20');
+            
+            const activeIcon = document.getElementById(`ch${activeUiNum}-icon`);
+            activeIcon.classList.replace('text-slate-300', 'text-blue-600');
+            activeIcon.classList.add('fa-bounce'); // Make the active icon bounce visually
+
+            // Read challenge instructions out loud for non-readers
+            playSpeech(ch.speech);
+        }
+
+        function handleAI(results) {
+            if (state.isProcessing || !results.multiFaceLandmarks?.[0]) return;
+
+            const feedback = document.getElementById('cam-feedback');
+            feedback.innerText = "Analyzing Face Parameters...";
+
+            const landmarks = results.multiFaceLandmarks[0];
+            const currentTask = state.challenges[state.currentChallengeIdx].id;
+            let success = false;
+
+            // Straight-facing challenges
+            if (currentTask === 'blink') {
+                const ear = (dist(landmarks[159], landmarks[145]) + dist(landmarks[386], landmarks[374])) / (2 * dist(landmarks[33], landmarks[133]));
+                if (ear < 0.18) success = true;
+            }
+            else if (currentTask === 'mouth') {
+                const mouthRatio = dist(landmarks[13], landmarks[14]) / dist(landmarks[78], landmarks[308]);
+                if (mouthRatio > 0.42) success = true;
+            }
+            else if (currentTask === 'smile') {
+                const mouthWidth = dist(landmarks[61], landmarks[291]);
+                const faceWidth = dist(landmarks[234], landmarks[454]);
+                if (mouthWidth / faceWidth > 0.45) success = true;
+            }
+            else if (currentTask === 'eyebrows') {
+                const faceHeight = dist(landmarks[10], landmarks[152]);
+                const eyebrowLeft = dist(landmarks[70], landmarks[159]);
+                const eyebrowRight = dist(landmarks[300], landmarks[386]);
+                const avgEyebrowDist = (eyebrowLeft + eyebrowRight) / 2;
+                const ratio = avgEyebrowDist / faceHeight;
+                if (ratio > 0.18) success = true; 
+            }
+            else if (currentTask === 'still') {
+                const nose = landmarks[1];
+                if (!state.stillStartPos) {
+                    state.stillStartPos = { x: nose.x, y: nose.y };
+                    state.stillFrames = 0;
+                } else {
+                    const drift = dist(nose, state.stillStartPos);
+                    if (drift < 0.008) {
+                        state.stillFrames++;
+                        if (state.stillFrames >= 25) { // Keeps head stable for ~1 second
+                            success = true;
+                            state.stillStartPos = null;
+                            state.stillFrames = 0;
+                        }
+                    } else {
+                        // Reset target position on drift movement
+                        state.stillStartPos = { x: nose.x, y: nose.y };
+                        state.stillFrames = 0;
+                    }
+                }
+            }
+
+            if (success) {
+                const uiNum = state.currentChallengeIdx + 1;
+                const ui = document.getElementById(`challenge-${uiNum}-ui`);
+                ui.className = "bg-emerald-50 p-5 rounded-2xl border border-emerald-200 flex flex-col items-center justify-center gap-2 shadow-sm transition-all duration-300";
+                
+                const icon = document.getElementById(`ch${uiNum}-icon`);
+                icon.className = "fa-solid fa-circle-check text-emerald-600 text-xl";
+
+                if (state.currentChallengeIdx < 1) {
+                    state.currentChallengeIdx++;
+                    updateChallengeUI();
+                } else {
+                    captureAndFinish();
+                }
+            }
+        }
+
+        function dist(p1, p2) {
+            return Math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2);
+        }
+
+        async function captureAndFinish() {
+            state.isProcessing = true;
+            document.getElementById('cam-feedback').innerText = "Analyzing Liveness & Matches...";
+            playSpeech("Processing. Please wait.");
+
+            const video = document.getElementById('video-feed');
+            const canvas = document.getElementById('capture-canvas');
+            canvas.width = 480; 
+            canvas.height = 480;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, 480, 480);
+
+            canvas.toBlob(async (blob) => {
+                cleanupMedia(); // Stop camera immediately on complete capture
+
+                const result = await sendToBackend(blob);
+
+                if (result.success) {
+                    showSuccess(result.message);
+                } else {
+                    showError("Biometric Failed", result.message || "Face could not be recognized.");
+                }
+            }, 'image/jpeg', 0.82);
+        }
+
+        async function sendToBackend(imageBlob) {
+            try {
+                const formData = new FormData();
+                formData.append("image", imageBlob, "capture.jpg");
+                formData.append("company_id", state.companyId);
+
+                const response = await fetch(`${API_URL}/recognize/`, {
+                    method: "POST",
+                    body: formData,
+                });
+
+                return await response.json();
+            } catch (error) {
+                return { success: false, message: "The database could not register the biometric payload." };
+            }
+        }
+
+        function cleanupMedia() {
+            if (state.camera) {
+                state.camera.stop();
+                state.camera = null;
+            }
+            const video = document.getElementById('video-feed');
+            if (video && video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+        }
+
+        function showSuccess(message) {
+            navigate('page-result', 3);
+            const icon = document.getElementById('res-icon');
+            icon.className = "w-24 h-24 bg-emerald-500 text-white rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-lg shadow-emerald-100 scale-105 transition-transform";
+            icon.innerHTML = `<i class="fa-solid fa-check text-4xl"></i>`;
+            document.getElementById('res-title').innerText = "Punch Verified";
+            document.getElementById('res-msg').innerText = message || "Biometrics recognized. Your shift entry has been recorded.";
+            playSpeech("Punch verified successfully. Thank you.");
+        }
+
+        function showError(title, msg) {
+            navigate('page-result', 3);
+            const icon = document.getElementById('res-icon');
+            icon.className = "w-24 h-24 bg-amber-500 text-white rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-lg shadow-amber-100";
+            icon.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-4xl"></i>`;
+            document.getElementById('res-title').innerText = title;
+            document.getElementById('res-msg').innerText = msg;
+            playSpeech("Verification failed. Please try again.");
+        }
+
+        document.getElementById('btn-reset').onclick = () => {
+            state.isProcessing = false;
+            document.getElementById('btn-start').disabled = false;
+            document.getElementById('btn-start').innerHTML = `<span>Start Attendance</span><i class="fa-solid fa-chevron-right text-xs"></i>`;
+            document.getElementById('status-area').classList.add('hidden');
+            navigate('page-start', 1);
+        };
+
+        window.onload = () => {
+            updateClock();
+            
+            const urlToken = new URLSearchParams(window.location.search).get('token');
+            const savedToken = localStorage.getItem('thesuit_terminal_token');
+
+            if (urlToken) {
+                localStorage.setItem('thesuit_terminal_token', urlToken);
+                state.companyId = urlToken;
+                document.getElementById('company-display').innerText = `Terminal ID: ${urlToken}`;
+                navigate('page-start', 1);
+            } else if (savedToken) {
+                state.companyId = savedToken;
+                document.getElementById('company-display').innerText = `Terminal ID: ${savedToken}`;
+                navigate('page-start', 1);
+            } else {
+                navigate('page-config');
+            }
+        };
+
+    })();
+    </script>
+</body>
+</html>
+
